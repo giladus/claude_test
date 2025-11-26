@@ -6,7 +6,7 @@
 # Action: VERIFICATION ONLY - No files will be modified
 #
 # USAGE:
-#   1. Edit the Configuration section below (lines 30-35) with your gateway details
+#   1. Edit the Configuration section below (lines 39-44) with your gateway details
 #   2. Make script executable: chmod +x checkpoint_gateway_verify.sh
 #   3. Run: ./checkpoint_gateway_verify.sh
 #
@@ -14,7 +14,11 @@
 #   ./checkpoint_gateway_verify.sh <gateway_host> <username> [port]
 #
 #   OR use environment variables:
-#   GATEWAY_HOST=gateway.host GATEWAY_USER=admin ./checkpoint_gateway_verify.sh
+#   GATEWAY_HOST=gateway.host GATEWAY_USER=admin GATEWAY_PASSWORD=pass ./checkpoint_gateway_verify.sh
+#
+# AUTHENTICATION:
+#   - SSH Key (Recommended): Leave GATEWAY_PASSWORD empty
+#   - Password: Set GATEWAY_PASSWORD (requires 'sshpass' installed)
 #
 # FILE CATEGORIES:
 #   - Public Config (cvpnd.C): MUST BE PATCHED - Never overwrite!
@@ -24,7 +28,7 @@
 #
 # REQUIREMENTS:
 #   - SSH access to Checkpoint gateway
-#   - SSH key authentication (recommended) or password
+#   - For password auth: sshpass package installed
 #   - Read permissions on gateway files
 #
 ###############################################################################
@@ -39,6 +43,7 @@ NC='\033[0m' # No Color
 # Configuration
 GATEWAY_HOST=""
 GATEWAY_USER=""
+GATEWAY_PASSWORD=""  # Optional: Leave empty to use SSH key authentication
 GATEWAY_PORT="22"
 BASE_INSTALL_PATH="/opt/CPrt-R81.20"  # Main Checkpoint installation directory
 
@@ -90,6 +95,21 @@ declare -a vsx_template_files_snx_links=(
 )
 
 ###############################################################################
+# Function: ssh_cmd
+# Description: Execute SSH command with or without password
+# Args: $@ - command to execute
+###############################################################################
+ssh_cmd() {
+    if [ ! -z "$GATEWAY_PASSWORD" ]; then
+        # Use sshpass for password authentication
+        sshpass -p "$GATEWAY_PASSWORD" ssh -p "${GATEWAY_PORT}" -o StrictHostKeyChecking=no "${GATEWAY_USER}@${GATEWAY_HOST}" "$@"
+    else
+        # Use SSH key authentication
+        ssh -p "${GATEWAY_PORT}" "${GATEWAY_USER}@${GATEWAY_HOST}" "$@"
+    fi
+}
+
+###############################################################################
 # Function: print_header
 # Description: Print formatted header
 ###############################################################################
@@ -107,7 +127,7 @@ print_header() {
 ###############################################################################
 check_file_exists() {
     local file_path="$1"
-    ssh -p "${GATEWAY_PORT}" "${GATEWAY_USER}@${GATEWAY_HOST}" "test -f '${file_path}'" 2>/dev/null
+    ssh_cmd "test -f '${file_path}'" 2>/dev/null
     return $?
 }
 
@@ -118,7 +138,7 @@ check_file_exists() {
 ###############################################################################
 get_file_info() {
     local file_path="$1"
-    ssh -p "${GATEWAY_PORT}" "${GATEWAY_USER}@${GATEWAY_HOST}" "ls -lh '${file_path}' 2>/dev/null | awk '{print \$5, \$6, \$7, \$8}'"
+    ssh_cmd "ls -lh '${file_path}' 2>/dev/null | awk '{print \$5, \$6, \$7, \$8}'"
 }
 
 ###############################################################################
@@ -163,12 +183,34 @@ verify_files() {
 ###############################################################################
 test_ssh_connection() {
     echo -e "${BLUE}Testing SSH connection to ${GATEWAY_HOST}...${NC}"
-    if ssh -p "${GATEWAY_PORT}" -o ConnectTimeout=10 "${GATEWAY_USER}@${GATEWAY_HOST}" "echo 'Connection successful'" 2>/dev/null; then
+
+    # Check if password is set and sshpass is available
+    if [ ! -z "$GATEWAY_PASSWORD" ]; then
+        if ! command -v sshpass &> /dev/null; then
+            echo -e "${RED}Error: sshpass is required for password authentication but not installed${NC}"
+            echo -e "${YELLOW}Install sshpass:${NC}"
+            echo -e "  - Ubuntu/Debian: sudo apt-get install sshpass"
+            echo -e "  - CentOS/RHEL: sudo yum install sshpass"
+            echo -e "  - macOS: brew install sshpass"
+            echo ""
+            echo -e "${YELLOW}Or use SSH key authentication by leaving GATEWAY_PASSWORD empty${NC}\n"
+            return 1
+        fi
+        echo -e "${YELLOW}Using password authentication${NC}"
+    else
+        echo -e "${YELLOW}Using SSH key authentication${NC}"
+    fi
+
+    if ssh_cmd "echo 'Connection successful'" 2>/dev/null; then
         echo -e "${GREEN}SSH connection successful${NC}\n"
         return 0
     else
         echo -e "${RED}SSH connection failed${NC}"
-        echo -e "${RED}Please check your gateway host, user, and SSH key configuration${NC}\n"
+        if [ ! -z "$GATEWAY_PASSWORD" ]; then
+            echo -e "${RED}Please check your gateway host, username, and password${NC}\n"
+        else
+            echo -e "${RED}Please check your gateway host, username, and SSH key configuration${NC}\n"
+        fi
         return 1
     fi
 }
@@ -204,11 +246,14 @@ main() {
         echo "Usage: Edit this script and set:"
         echo "  GATEWAY_HOST=\"your.gateway.host\""
         echo "  GATEWAY_USER=\"your_username\""
+        echo "  GATEWAY_PASSWORD=\"your_password\"  # Optional, leave empty for SSH key auth"
         echo "  GATEWAY_PORT=\"22\"  # Optional, default is 22"
         echo "  BASE_INSTALL_PATH=\"/opt/CPrt-R81.20\"  # Adjust as needed"
         echo ""
         echo "Or run with environment variables:"
-        echo "  GATEWAY_HOST=your.gateway.host GATEWAY_USER=admin $0"
+        echo "  GATEWAY_HOST=your.gateway.host GATEWAY_USER=admin GATEWAY_PASSWORD=yourpass $0"
+        echo ""
+        echo "Note: Password authentication requires 'sshpass' to be installed"
         exit 1
     fi
 
