@@ -6,7 +6,7 @@
 # Action: VERIFICATION ONLY - No files will be modified
 #
 # USAGE:
-#   1. Edit the Configuration section below (lines 39-44) with your gateway details
+#   1. Edit the Configuration section below (lines 44-49) with your gateway details
 #   2. Make script executable: chmod +x checkpoint_gateway_verify.sh
 #   3. Run: ./checkpoint_gateway_verify.sh
 #
@@ -19,6 +19,10 @@
 # AUTHENTICATION:
 #   - SSH Key (Recommended): Leave GATEWAY_PASSWORD empty
 #   - Password: Set GATEWAY_PASSWORD (requires 'sshpass' installed)
+#
+# MODIFICATION DETECTION:
+#   - RECENT_DAYS: Files modified within this many days are flagged as "recently modified"
+#   - Default is 30 days - adjust as needed for your environment
 #
 # FILE CATEGORIES:
 #   - Public Config (cvpnd.C): MUST BE PATCHED - Never overwrite!
@@ -46,6 +50,7 @@ GATEWAY_USER=""
 GATEWAY_PASSWORD=""  # Optional: Leave empty to use SSH key authentication
 GATEWAY_PORT="22"
 BASE_INSTALL_PATH="/opt/CPrt-R81.20"  # Main Checkpoint installation directory
+RECENT_DAYS="30"  # Consider files modified within this many days as "recently modified"
 
 # CVPN public configuration files (must not be overwritten - only patched)
 # These are typically in /opt/CPrt-R81.20/conf/
@@ -142,6 +147,49 @@ get_file_info() {
 }
 
 ###############################################################################
+# Function: get_file_age_days
+# Description: Get file age in days
+# Args: $1 - file path
+# Returns: File age in days, or empty if error
+###############################################################################
+get_file_age_days() {
+    local file_path="$1"
+    local file_mtime=$(ssh_cmd "stat -c %Y '${file_path}' 2>/dev/null")
+
+    if [ -z "$file_mtime" ]; then
+        echo ""
+        return
+    fi
+
+    local current_time=$(ssh_cmd "date +%s")
+    local age_seconds=$((current_time - file_mtime))
+    local age_days=$((age_seconds / 86400))
+
+    echo "$age_days"
+}
+
+###############################################################################
+# Function: was_modified_recently
+# Description: Check if file was modified recently
+# Args: $1 - file path
+# Returns: 0 if recently modified, 1 if not
+###############################################################################
+was_modified_recently() {
+    local file_path="$1"
+    local age_days=$(get_file_age_days "$file_path")
+
+    if [ -z "$age_days" ]; then
+        return 1
+    fi
+
+    if [ "$age_days" -le "$RECENT_DAYS" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+###############################################################################
 # Function: verify_files
 # Description: Verify files and report status
 # Args: $1 - array name, $2 - file type description, $3 - action type
@@ -155,15 +203,31 @@ verify_files() {
 
     local found=0
     local missing=0
+    local recently_modified=0
 
     for file in "${files_array[@]}"; do
         local full_path="${BASE_INSTALL_PATH}/${file}"
 
         if check_file_exists "$full_path"; then
             local file_info=$(get_file_info "$full_path")
+            local age_days=$(get_file_age_days "$full_path")
+
             echo -e "${GREEN}[EXISTS]${NC} ${file}"
             echo -e "         Action: ${YELLOW}${action_type}${NC}"
             echo -e "         Info: ${file_info}"
+
+            # Show modification status
+            if [ ! -z "$age_days" ]; then
+                if [ "$age_days" -le "$RECENT_DAYS" ]; then
+                    echo -e "         Modified: ${GREEN}Recently modified${NC} (${age_days} days ago)"
+                    ((recently_modified++))
+                else
+                    echo -e "         Modified: ${YELLOW}NOT recently modified${NC} (${age_days} days ago)"
+                fi
+            else
+                echo -e "         Modified: ${YELLOW}Unable to determine${NC}"
+            fi
+
             echo ""
             ((found++))
         else
@@ -174,7 +238,7 @@ verify_files() {
         fi
     done
 
-    echo -e "Summary: ${GREEN}${found} found${NC}, ${RED}${missing} missing${NC}"
+    echo -e "Summary: ${GREEN}${found} found${NC}, ${RED}${missing} missing${NC}, ${GREEN}${recently_modified} modified within ${RECENT_DAYS} days${NC}"
 }
 
 ###############################################################################
