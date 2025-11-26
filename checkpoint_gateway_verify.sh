@@ -4,6 +4,29 @@
 # Checkpoint Gateway File Verification Script
 # Purpose: Connect to Checkpoint gateway via SSH and verify file status
 # Action: VERIFICATION ONLY - No files will be modified
+#
+# USAGE:
+#   1. Edit the Configuration section below (lines 30-35) with your gateway details
+#   2. Make script executable: chmod +x checkpoint_gateway_verify.sh
+#   3. Run: ./checkpoint_gateway_verify.sh
+#
+#   OR use command line arguments:
+#   ./checkpoint_gateway_verify.sh <gateway_host> <username> [port]
+#
+#   OR use environment variables:
+#   GATEWAY_HOST=gateway.host GATEWAY_USER=admin ./checkpoint_gateway_verify.sh
+#
+# FILE CATEGORIES:
+#   - Public Config (cvpnd.C): MUST BE PATCHED - Never overwrite!
+#   - Internal Config (conf/includes/*.conf): CAN BE OVERWRITTEN
+#   - Portal Files (htdocs/HFS, htdocs/SNX): CAN BE OVERWRITTEN
+#   - SNX Files (htdocs/SNX/CSHELL): CAN BE OVERWRITTEN
+#
+# REQUIREMENTS:
+#   - SSH access to Checkpoint gateway
+#   - SSH key authentication (recommended) or password
+#   - Read permissions on gateway files
+#
 ###############################################################################
 
 # Color codes for output
@@ -17,14 +40,16 @@ NC='\033[0m' # No Color
 GATEWAY_HOST=""
 GATEWAY_USER=""
 GATEWAY_PORT="22"
-BASE_PATH="/opt/CPrt-R81.20/htdocs"  # Adjust base path as needed
+BASE_INSTALL_PATH="/opt/CPrt-R81.20"  # Main Checkpoint installation directory
 
 # CVPN public configuration files (must not be overwritten - only patched)
+# These are typically in /opt/CPrt-R81.20/conf/
 declare -a vsx_template_files_conf_public=(
-    "cvpnd.C"
+    "conf/cvpnd.C"
 )
 
 # CVPN internal configuration files (can be overwritten)
+# These are typically in /opt/CPrt-R81.20/conf/includes/
 declare -a vsx_template_files_conf_internal=(
     "conf/includes/Login.location.conf"
     "conf/includes/Main.virtualhost.conf"
@@ -112,7 +137,7 @@ verify_files() {
     local missing=0
 
     for file in "${files_array[@]}"; do
-        local full_path="${BASE_PATH}/${file}"
+        local full_path="${BASE_INSTALL_PATH}/${file}"
 
         if check_file_exists "$full_path"; then
             local file_info=$(get_file_info "$full_path")
@@ -156,7 +181,7 @@ generate_summary_report() {
     print_header "VERIFICATION SUMMARY REPORT"
 
     echo -e "${YELLOW}Gateway:${NC} ${GATEWAY_USER}@${GATEWAY_HOST}:${GATEWAY_PORT}"
-    echo -e "${YELLOW}Base Path:${NC} ${BASE_PATH}"
+    echo -e "${YELLOW}Installation Path:${NC} ${BASE_INSTALL_PATH}"
     echo -e "${YELLOW}Date:${NC} $(date)"
     echo ""
 
@@ -180,7 +205,7 @@ main() {
         echo "  GATEWAY_HOST=\"your.gateway.host\""
         echo "  GATEWAY_USER=\"your_username\""
         echo "  GATEWAY_PORT=\"22\"  # Optional, default is 22"
-        echo "  BASE_PATH=\"/opt/CPrt-R81.20\"  # Adjust as needed"
+        echo "  BASE_INSTALL_PATH=\"/opt/CPrt-R81.20\"  # Adjust as needed"
         echo ""
         echo "Or run with environment variables:"
         echo "  GATEWAY_HOST=your.gateway.host GATEWAY_USER=admin $0"
